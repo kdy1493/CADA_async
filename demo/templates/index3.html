@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>FastRTC Demo</title>
+  <style>
+    video { width: 60%; border: 2px solid #ccc; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h2>스트림 테스트</h2>
+
+  <video id="video_output_component_id" autoplay playsinline></video>
+
+  <script>
+    
+    const pc = new RTCPeerConnection();
+    const video_output_component = document.getElementById("video_output_component_id");
+                        
+    async function setupWebRTC(peerConnection) {
+              
+        // Get video stream from webcam
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+        })
+        
+        //  Send video stream to server
+        stream.getTracks().forEach(async (track) => {
+            const sender = pc.addTrack(track, stream);
+        })
+        
+        // Receive video stream from server
+        peerConnection.addEventListener("track", (evt) => {
+            if (video_output_component && 
+                video_output_component.srcObject !== evt.streams[0]) {
+                video_output_component.srcObject = evt.streams[0];
+            }
+        });
+        
+        // Create data channel (needed!)
+        const dataChannel = peerConnection.createDataChannel("text");
+
+        // Create and send offer
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        let webrtc_id = Math.random().toString(36).substring(7)
+
+        // Send ICE candidates to server
+        // (especially needed when server is behind firewall)
+        peerConnection.onicecandidate = ({ candidate }) => {
+            if (candidate) {
+                console.debug("Sending ICE candidate", candidate);
+                fetch('/webrtc/offer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    candidate: candidate.toJSON(),
+                    webrtc_id: webrtc_id,
+                    type: "ice-candidate",
+                        })
+                    })
+                }
+        };
+
+        // Send offer to server
+        const response = await fetch('/webrtc/offer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sdp: offer.sdp,
+                type: offer.type,
+                webrtc_id: webrtc_id
+            })
+        });
+
+        // Handle server response
+        const serverResponse = await response.json();
+        await peerConnection.setRemoteDescription(serverResponse);
+    }
+    window.addEventListener('DOMContentLoaded', () => {
+      setupWebRTC(pc).catch(console.error);
+    });
+  </script>
+</body>
+</html>

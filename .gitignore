@@ -1,0 +1,46 @@
+# ---- Python artifacts --------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.so
+
+# Distributions / packaging
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Logs & reports
+*.log
+*.coverage*
+htmlcov/
+
+# IDE / editor settings
+.idea/
+.vscode/
+*.sublime-*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test cache
+.pytest_cache/
+
+# Data & large files (calibration csvs are tracked, so keep subfolder!)
+*.pptx
+*.csv
+*.npy
+
+# Misc
+coverage.xml 
