@@ -6,12 +6,17 @@ from demo.config.settings import (
     CSI_SUBCARRIERS, CSI_INDICES_TO_REMOVE, CSI_FPS_LIMIT,
     BROKER_ADDR, BROKER_PORT
 )
-from flask_socketio import SocketIO
+import socketio
+
+# ---------------------------------------
+# CADAService: works with python-socketio
+# ---------------------------------------
 
 class CADAService:
     
-    def __init__(self, socketio: SocketIO):
-        self.socketio = socketio
+    def __init__(self, sio: socketio.AsyncServer):
+        """sio: python-socketio Server (async_mode='asgi')"""
+        self.sio = sio
         self.buf_mgr = None
         self.sliding_processors = {}
         self.mqtt_manager = None
@@ -39,7 +44,7 @@ class CADAService:
         }
 
         self.mqtt_manager = MQTTManager(
-            socketio=self.socketio,
+            sio=self.sio,
             topics=CSI_TOPIC,
             broker_address=BROKER_ADDR,
             broker_port=BROKER_PORT,

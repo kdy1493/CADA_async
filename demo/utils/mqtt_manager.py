@@ -11,7 +11,8 @@ Key Functions
 
 import autorootcwd
 import time
-from flask_socketio import SocketIO
+import socketio
+import asyncio
 from src.CADA.CADA_process import parse_and_normalize_payload
 import paho.mqtt.client as paho
 import paho.mqtt.client as mqtt
@@ -53,10 +54,10 @@ def start_csi_mqtt_thread(message_handler, topics=None, broker_address=None, bro
     return thread, client
 
 class MQTTManager:
-    def __init__(self, socketio: SocketIO, topics: list, broker_address: str, broker_port: int,
+    def __init__(self, sio: socketio.AsyncServer, topics: list, broker_address: str, broker_port: int,
                  subcarriers: int, indices_to_remove: list, buffer_manager, sliding_processors: dict,
                  fps_limit: int = 10):
-        self.socketio = socketio
+        self.sio = sio
         self.topics = topics
         self.broker_address = broker_address
         self.broker_port = broker_port
@@ -79,9 +80,22 @@ class MQTTManager:
         self._last_activity_time = 0.0 # Recent flag>0 time
         self._off_delay_sec = 2.0      # OFF transmission delay after inactivity
 
+        # 메인 이벤트 루프 저장 (ASGI 서버가 실행 중인 루프)
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 초기화 시점에 아직 루프가 없으면 None, 이후 start() 단계에서 갱신
+            self.loop = None
+
     def start(self):
         if self._mqtt_started:
             return
+        # FastAPI/uvicorn 이 시작된 뒤에 호출될 가능성이 높으므로 여기서 루프 갱신
+        if self.loop is None:
+            try:
+                self.loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
         start_csi_mqtt_thread(
             message_handler=self.mqtt_handler,
             topics=self.topics,
@@ -92,6 +106,8 @@ class MQTTManager:
         self._mqtt_started = True
 
     def mqtt_handler(self, topic: str, payload: str):
+        # DEBUG: raw MQTT payload preview
+        #print("MQTT raw", topic, payload[:60])
         now = time.time()
         prev_emit = self.time_last_emit.get(topic, 0.0)
 
@@ -117,13 +133,21 @@ class MQTTManager:
             return
         self.time_last_emit[topic] = now
 
-        self.socketio.emit("cada_result", {
-            "topic": topic,
-            "timestamp_ms": ts_ms,
-            "activity": float(activity),
-            "flag": int(flag),
-            "threshold": float(threshold),
-        }, namespace="/csi")
+        if self.loop and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self.sio.emit(
+                    "cada_result",
+                    {
+                        "topic": topic,
+                        "timestamp_ms": ts_ms,
+                        "activity": float(activity),
+                        "flag": int(flag),
+                        "threshold": float(threshold),
+                    },
+                    namespace="/csi"
+                ),
+                self.loop,
+            )
 
         # -------- Trigger publish with hysteresis ----------
         if flag > 0:
@@ -132,6 +156,9 @@ class MQTTManager:
             self.trigger_cli.publish("ptz/trigger", "1")
             # self._last_trigger_state = 1
         # OFF 신호는 DetectionProcessor 에서 인물 소실 시점에 발행 
+
+        # emit 직전
+        # print("DEBUG emit", topic, float(activity), int(flag))
 
     # def _on_trigger_message(self, client, userdata, msg):
     #     """브로커로부터 ptz/trigger 메시지를 수신해 내부 상태를 동기화"""
