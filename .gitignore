@@ -9,7 +9,7 @@ __pycache__/
 build/
 dist/
 .eggs/
-*.egg-info/
+*.egg-info/                                                                                                   
 *.egg
 
 # Virtual environments
@@ -43,4 +43,6 @@ Thumbs.db
 *.npy
 
 # Misc
-coverage.xml 
+coverage.xml
+uv.lock
+pyproject.toml

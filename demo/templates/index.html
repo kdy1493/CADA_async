@@ -23,16 +23,14 @@
     .plot-box { flex: 5 1 0; background:#fafbfc; border:1px solid #ddd; border-radius:4px; display:flex; }
     .plot-box img { width:100%; height:auto; max-height:100%; object-fit:contain; }
     #plots { flex:1; width:100%; height:100%; }
-    .alert-overlay { position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(255,0,0,0.6); opacity:0; pointer-events:none; transition:opacity 0.15s ease; }
-    .alert-overlay.active { opacity:1; }
+
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="left-col">
       <div class="video-box">
-        <img src="{{ url_for('video_feed') }}" />
-        <div id="alert-overlay" class="alert-overlay"></div>
+        <video id="video-output" autoplay playsinline style="width:100%;height:100%;border-radius:8px;"></video>
       </div>
       <div class="plot-box"><div id="plots"></div></div>
     </div>
@@ -42,105 +40,228 @@
         <div class="dot"></div>
         <div class="text">Waiting for human</div>
       </div>
-      <div id="alert-log" class="log"></div>
+      <!-- 숨김: JS 의 confThreshold 참조 오류 방지용 -->
+      <div style="display:none" class="slider-container">
+        <label>Confidence Threshold: <span id="conf-value">0.3</span></label>
+        <input type="range" id="conf-threshold" min="0" max="1" step="0.01" value="0.3">
+      </div>
     </div>
   </div>
 
-  <script>
-    function updateStatus(code) {
-      const status = document.getElementById("status");
-      const text   = status.querySelector(".text");
-      if (code === "00" || code === "01") {
-        status.classList.add("tracking");
-        text.textContent = "Human Tracking";
-      } else if (code === "02") {
-        status.classList.remove("tracking");
-        text.textContent = "Waiting for human";
-      }
-    }
+  <!-- Toast element for showError() -->
+  <div id="error-toast" style="display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f44336;color:#fff;padding:8px 16px;border-radius:4px;z-index:1000;"></div>
 
-    function addLogEntry(code, message) {
-      const entry = document.createElement("div");
-      entry.className = "log-entry";
+    <script>
+        let peerConnection;
+        let webrtc_id;
+        const videoOutput = document.getElementById('video-output');
+        const confThreshold = document.getElementById('conf-threshold');
+        const confValue = document.getElementById('conf-value');
 
-      const ts = document.createElement("span");
-      ts.className = "ts";
-      ts.textContent = new Date().toLocaleTimeString();
 
-      const txt = document.createElement("span");
-      txt.textContent = `${code}: ${message}`;
 
-      entry.append(ts, txt);
-
-      const logDiv = document.getElementById("alert-log");
-      if (logDiv.firstChild) {
-        logDiv.insertBefore(entry, logDiv.firstChild);
-      } else {
-        logDiv.appendChild(entry);
-      }
-    }
-
-    // --- Alerts (SSE) -------------------------------------------------
-    const alertEvt = new EventSource("/alerts");
-    alertEvt.onmessage = e => {
-      if (!e.data.trim()) return;
-      const { code, message } = JSON.parse(e.data);
-      addLogEntry(code, message);
-      updateStatus(code);
-    };
-
-    // --- CSI Plot (SocketIO + Plotly) ---------------------------------
-    const socket = io("/csi");
-    const gd     = document.getElementById("plots");
-    const trMap  = {};             // topic → {act, thr, flag}
-    const MAXPTS = 500;
-
-    Plotly.newPlot(gd, [], {
-      title:"Waiting for data…",
-      xaxis:{title:"Time", type:"date"},
-      yaxis:{title:"Value"}
-    }, {responsive:true});
-
-    socket.on("cada_result", msg=>{
-      const t = msg.topic;
-      const x = new Date(msg.timestamp_ms);
-      const yA = msg.activity;
-      const yT = msg.threshold;
-      const yF = msg.flag;
-
-      if(!(t in trMap)){
-        const base = t.replaceAll("/","_");
-        const actTr = {x:[x],y:[yA],mode:"lines",name:`${base}_act`,line:{color:"#1f77b4"}};
-        const thrTr = {x:[x],y:[yT],mode:"lines",name:`${base}_thr`,line:{dash:"dot",color:"#ff7f0e"}};
-        const flgTr = {x:[x],y:[yF],mode:"lines",name:`${base}_flag`,line:{color:"#2ca02c"}};
-        const actIdx = gd.data.length;
-        const thrIdx = actIdx+1;
-        const flgIdx = actIdx+2;
-        Plotly.addTraces(gd,[actTr,thrTr,flgTr]);
-        trMap[t]={actIdx,thrIdx,flgIdx,lastFlag:yF};
-        Plotly.relayout(gd,{title:""});
-      }else{
-        const {actIdx,thrIdx,flgIdx}=trMap[t];
-        Plotly.extendTraces(gd,{x:[[x]],y:[[yA]]},[actIdx],MAXPTS);
-        Plotly.extendTraces(gd,{x:[[x]],y:[[yT]]},[thrIdx],MAXPTS);
-        Plotly.extendTraces(gd,{x:[[x]],y:[[yF]]},[flgIdx],MAXPTS);
-        
-        if(yF > 0 && trMap[t].lastFlag === 0) {
-          flashOverlay();
+        function updateConfThreshold(value) {
+            fetch('/input_hook', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    webrtc_id: webrtc_id,
+                    conf_threshold: parseFloat(value)
+                })
+            });
         }
-        trMap[t].lastFlag = yF;
-      }
-    });
 
-    function requestRedetect() {
-      fetch("/redetect", { method: "POST" });
-    }
+        function showError(message) {
+            const toast = document.getElementById('error-toast');
+            toast.textContent = message;
+            toast.className = 'toast error';
+            toast.style.display = 'block';
 
-    const overlay = document.getElementById("alert-overlay");
-    function flashOverlay(){
-      overlay.classList.add("active");
-      setTimeout(()=>overlay.classList.remove("active"), 500);
-    }
-  </script>
+            // Hide toast after 5 seconds
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 5000);
+        }
+
+        async function setupWebRTC() {
+            const config = __RTC_CONFIGURATION__;
+            peerConnection = new RTCPeerConnection(config);
+
+            const timeoutId = setTimeout(() => {
+                const toast = document.getElementById('error-toast');
+                toast.textContent = "Connection is taking longer than usual. Are you on a VPN?";
+                toast.className = 'toast warning';
+                toast.style.display = 'block';
+
+                // Hide warning after 5 seconds
+                setTimeout(() => {
+                    toast.style.display = 'none';
+                }, 5000);
+            }, 5000);
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({video: true});
+
+                stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+                peerConnection.addEventListener('track', 
+                    (evt) => videoOutput && videoOutput.srcObject !== evt.streams[0] && (videoOutput.srcObject = evt.streams[0]));
+
+                const dataChannel = peerConnection.createDataChannel('text');
+                dataChannel.onmessage = (event) => {
+                    const eventJson = JSON.parse(event.data);
+                    if (eventJson.type === "error") {
+                        showError(eventJson.message);
+                    } else if (eventJson.type === "send_input") {
+                        updateConfThreshold(confThreshold.value);
+                    }
+                };
+
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                await new Promise((resolve) => {
+                    if (peerConnection.iceGatheringState === "complete") {resolve();} 
+                    else {
+                        const checkState = () => {
+                            if (peerConnection.iceGatheringState === "complete") {
+                                peerConnection.removeEventListener("icegatheringstatechange", checkState);
+                                resolve();
+                            }
+                        };
+                        peerConnection.addEventListener("icegatheringstatechange", checkState);
+                    }
+                });
+
+                webrtc_id = Math.random().toString(36).substring(7);
+
+                const response = await fetch('/webrtc/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: peerConnection.localDescription.sdp,
+                        type: peerConnection.localDescription.type,
+                        webrtc_id: webrtc_id
+                    })
+                });
+
+                const serverResponse = await response.json();
+
+                if (serverResponse.status === 'failed') {
+                    showError(serverResponse.meta.error === 'concurrency_limit_reached'
+                        ? `Too many connections. Maximum limit is ${serverResponse.meta.limit}`
+                        : serverResponse.meta.error);
+                    stop();
+
+                    return;
+                }
+
+                await peerConnection.setRemoteDescription(serverResponse);
+
+                // Send initial confidence threshold
+                updateConfThreshold(confThreshold.value);
+
+                peerConnection.addEventListener('connectionstatechange', () => {
+                    if (peerConnection.connectionState === 'connected') {
+                        clearTimeout(timeoutId);
+                        const toast = document.getElementById('error-toast');
+                        toast.style.display = 'none';
+                    }
+                });
+
+            } catch (err) {
+                clearTimeout(timeoutId);
+                console.error('Error setting up WebRTC:', err);
+                showError('Failed to establish connection. Please try again.');
+                stop();
+
+            }
+        }
+
+        function requestRedetect(){
+            stop();
+            setupWebRTC();
+        }
+
+        function stop() {
+            if (peerConnection) {
+                if (peerConnection.getTransceivers) {
+                    peerConnection.getTransceivers().forEach(transceiver => {
+                        if (transceiver.stop) {
+                            transceiver.stop();
+                        }
+                    });
+                }
+
+                if (peerConnection.getSenders) {
+                    peerConnection.getSenders().forEach(sender => {
+                        if (sender.track && sender.track.stop) sender.track.stop();
+                    });
+                }
+
+                setTimeout(() => {
+                    peerConnection.close();
+                }, 500);
+            }
+
+            videoOutput.srcObject = null;
+        }
+
+
+        // --- CSI Plot (SocketIO + Plotly) ---------------------------------
+        const socket = io("/csi", {
+            path: "/socket.io",        // 서버 기본 path
+            transports: ["websocket"]  // 바로 WS 업그레이드
+        });
+        const gd     = document.getElementById("plots");
+        const trMap  = {};             // topic → {act, thr, flag}
+        const MAXPTS = 500;
+
+        Plotly.newPlot(gd, [], {
+        title:"Waiting for data…",
+        xaxis:{title:"Time", type:"date", tickformat:"%H:%M:%S"},
+        yaxis:{title:"Value"}
+        }, {responsive:true});
+
+        socket.on("connect", () => console.log("⚡ sio connected", socket.id));
+        socket.on("cada_result", m => console.log("📈 recv", m));
+
+        socket.on("cada_result", msg=>{
+        const t = msg.topic;
+        const x = msg.timestamp_ms;  // epoch milliseconds (numeric)
+        const yA = msg.activity;
+        const yT = msg.threshold;
+        const yF = msg.flag;
+
+        if(!(t in trMap)){
+            const base = t.replaceAll("/","_");
+            const actTr = {x:[x],y:[yA],mode:"lines",name:`${base}_act`,line:{color:"#1f77b4"}};
+            const thrTr = {x:[x],y:[yT],mode:"lines",name:`${base}_thr`,line:{dash:"dot",color:"#ff7f0e"}};
+            const flgTr = {x:[x],y:[yF],mode:"lines",name:`${base}_flag`,line:{color:"#2ca02c"}};
+            const actIdx = gd.data.length;
+            const thrIdx = actIdx+1;
+            const flgIdx = actIdx+2;
+            Plotly.addTraces(gd,[actTr,thrTr,flgTr]);
+            trMap[t]={actIdx,thrIdx,flgIdx,lastFlag:yF};
+            Plotly.relayout(gd,{title:""});
+        }else{
+            const {actIdx,thrIdx,flgIdx}=trMap[t];
+            Plotly.extendTraces(gd,{x:[[x]],y:[[yA]]},[actIdx],MAXPTS);
+            Plotly.extendTraces(gd,{x:[[x]],y:[[yT]]},[thrIdx],MAXPTS);
+            Plotly.extendTraces(gd,{x:[[x]],y:[[yF]]},[flgIdx],MAXPTS);
+            
+
+        }
+        });
+
+        // 페이지 로드 시 자동으로 WebRTC 세션 시작 ---------------------
+        window.addEventListener('load', ()=>{
+            setupWebRTC();
+        });
+
+    </script>
 </body>
-</html> 
+
+</html>

@@ -127,7 +127,11 @@ class MQTTManager:
         activity = self.buffer_manager.cada_feature_buffers["activity_detection"][topic][idx]
         flag = self.buffer_manager.cada_feature_buffers["activity_flag"][topic][idx]
         threshold = self.buffer_manager.cada_feature_buffers["threshold"][topic][idx]
-        ts_ms = int(pkt_time.timestamp()*1000)
+        # Plotly 에서 x축을 Date 로 사용하므로, 모듈 내부 타임스탬프 대신
+        # 서버 수신 시각(UTC 기반 epoch milliseconds)을 사용한다.
+        # ESP/CSI 원본 타임스탬프가 갱신되지 않는 경우 그래프가 수직선으로
+        # 겹쳐 보이는 문제를 방지한다.
+        ts_ms = int(time.time()*1000)
 
         if (now - prev_emit) < 1.0/self.fps_limit:
             return
@@ -150,7 +154,7 @@ class MQTTManager:
             )
 
         # -------- Trigger publish with hysteresis ----------
-        if flag > 0:
+        if flag > 0: 
             # 활동 감지: 스트림 ON (변경 시에만 전송)
             # if self._last_trigger_state == 0:
             self.trigger_cli.publish("ptz/trigger", "1")

@@ -17,50 +17,6 @@ LICENSE = "Apache 2.0"
 with open("README.md", "r", encoding="utf-8") as f:
     LONG_DESCRIPTION = f.read()
 
-# Required dependencies
-REQUIRED_PACKAGES = [
-    "torch>=2.3.1",
-    "torchvision>=0.18.1",
-    "numpy==1.26.4",
-    "tqdm>=4.66.1",
-    "hydra-core>=1.3.2",
-    "iopath>=0.1.10",
-    "pillow>=9.4.0",
-]
-
-EXTRA_PACKAGES = {
-    "notebooks": [
-        "matplotlib>=3.9.1",
-        "jupyter>=1.0.0",
-        "opencv-python>=4.7.0",
-        "eva-decord>=0.6.1",
-    ],
-    "interactive-demo": [
-        "Flask>=3.0.3",
-        "Flask-Cors>=5.0.0",
-        "av>=13.0.0",
-        "dataclasses-json>=0.6.7",
-        "eva-decord>=0.6.1",
-        "gunicorn>=23.0.0",
-        "imagesize>=1.4.1",
-        "pycocotools>=2.0.8",
-        "strawberry-graphql>=0.243.0",
-    ],
-    "dev": [
-        "black==24.2.0",
-        "usort==1.0.2",
-        "ufmt==2.0.0b2",
-        "fvcore>=0.1.5.post20221221",
-        "pandas>=2.2.2",
-        "scikit-image>=0.24.0",
-        "tensorboard>=2.17.0",
-        "pycocotools>=2.0.8",
-        "tensordict>=0.5.0",
-        "opencv-python>=4.7.0",
-        "submitit>=1.5.1",
-    ],
-}
-
 BUILD_CUDA = os.getenv("SAM2_BUILD_CUDA", "1") == "1"
 BUILD_ALLOW_ERRORS = os.getenv("SAM2_BUILD_ALLOW_ERRORS", "1") == "1"
 
@@ -154,33 +110,41 @@ setup(
     packages=find_packages(where="src"),
 
     install_requires=[
+        # --- 필수 라이브러리 (프로젝트 코드에서 실제 사용) -------------------
         "torch>=2.3.1",
-        "torchvision>=0.18.1",
-        "opencv-python>=4.9.0.80",
         "numpy==1.26.4",
+        "opencv-python>=4.9.0.80",
+        "torchvision>=0.18.1",
+
+        # 서버 & 실시간 통신
         "flask>=3.0.3",
         "flask-socketio>=5.5.1",
-        "ffmpeg-python>=0.2.0",
+        "python-socketio>=5.11.1",
+        "fastapi>=0.111.0",
+        "uvicorn>=0.29.0",
+
+        # 실시간 스트리밍 / WebRTC
+        "fastrtc>=0.2.5",
+
+        # 모델 추론
         "ultralytics>=8.3.131",
-        "hydra-core>=1.3.2",
-        "iopath>=0.1.10",
-        "transformers==4.40.2",
-        "accelerate>=0.20.0",
-        "sentencepiece>=0.1.99",
-        "protobuf>=3.20.0",
-        "huggingface_hub>=0.19.0",
-        "pillow>=9.4.0",
-        "tqdm>=4.66.1",
-        "autoroot>=1.0.1",
-        "autorootcwd>=1.0.1",
-        "matplotlib>=3.10.3",
-        "paho-mqtt>=2.1.0",
-        "pandas>=2.2.3",
-        "pip>=25.1.1",
-        "requests>=2.32.3",
-        "scikit-learn>=1.6.1",
+        "onnxruntime>=1.18.0",
+
+        # 데이터 처리 / 과학 연산
         "scipy>=1.15.3",
-        "keyboard>=0.13.5",
+        "paho-mqtt>=2.1.0",
+        "autorootcwd>=1.0.1",
+
+        # 인터랙티브 데모 & UI
+        "gradio>=4.38.0",
+
+        # 기타 유틸
+        "huggingface_hub>=0.19.0",
+        "pydantic>=2.7.1",
+        "fastapi>=0.115.13",
+        "fastrtc>=0.0.28",
+        "gradio>=5.34.2",
+        "onnxruntime>=1.22.0",
     ],
 
     extras_require={
