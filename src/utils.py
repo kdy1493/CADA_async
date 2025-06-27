@@ -95,9 +95,12 @@ class YOLOv10:
         return self.detect_objects(image)
 
     def initialize_model(self, path):
-        self.session = onnxruntime.InferenceSession(
-            path, providers=onnxruntime.get_available_providers()
-        )
+        # Try GPU first then CPU
+        available = onnxruntime.get_available_providers()
+        preferred = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        providers = [p for p in preferred if p in available]
+        print(f"[YOLOv10] Using ONNX providers: {providers}")
+        self.session = onnxruntime.InferenceSession(path, providers=providers)
         # Get model info
         self.get_input_details()
         self.get_output_details()
